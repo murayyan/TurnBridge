@@ -36,16 +36,19 @@ teks share multi-baris, `maps.apple.com/?q=..&ll=..`, `?daddr=..`, link
 Kalau clipboard tidak terbaca, aplikasi membuka **sheet tempel manual** berisi teks mentah
 clipboard — tempel/rapikan di situ lalu tekan **Mulai Navigasi**.
 
-## Kalau rute tidak muncul
+## Kecepatan notifikasi
 
-Kartu **DIAGNOSA** di bawah layar mencatat: isi clipboard, link yang dipakai, hasil parsing,
-dan jawaban MapKit. Tekan **Salin log** lalu kirim isinya.
+- Mobil: peringatan dikirim **350 m** sebelum belokan (jalan kaki 70 m, transit 150 m),
+  jadi getaran sampai sebelum tikungan meski Bluetooth butuh beberapa detik.
+- Jeda antar peringatan 3 detik → tikungan rapat tetap dapat notifikasi.
+- Langkah yang sudah terlewati tidak lagi "menelan" peringatan belokan berikutnya.
 
-Penyebab yang sudah ditangani otomatis:
+Kalau notifikasi masih telat, cek di sisi jam/HP:
 
-- GPS belum dapat titik (baru buka app) → minta satu lokasi lalu hitung ulang.
-- Titik tujuan tidak bisa dirutekan (pin di tengah gedung) → dicari ulang lewat MKLocalSearch.
-- Link `?daddr=Nama`, `?query=..`, `maps.apple.com/directions?destination=..` → dikenali.
+- Huawei Health > Perangkat > Watch Fit 3 > Notifikasi > **TurnBridge** ON
+- iPhone > Pengaturan > Bluetooth > (i) Watch Fit 3 > **Share System Notifications** ON
+- iPhone > Pengaturan > Huawei Health > **Latar Belakang App Refresh** ON, Lokasi **Selalu**
+- Jangan aktifkan mode Hemat Daya saat navigasi
 
 ## Build
 

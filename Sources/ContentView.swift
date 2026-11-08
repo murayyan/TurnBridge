@@ -33,17 +33,19 @@ struct ContentView: View {
                         activeCard
                         searchBar
 
+                        if engine.isBusy {
+                            loadingCard
+                        }
+
                         if !results.isEmpty {
                             resultList
                         } else {
                             if !engine.steps.isEmpty {
                                 stepsCard
                             }
-                            instructionsCard
-                        }
-
-                        if engine.lastError != nil || !engine.debugLines.isEmpty {
-                            diagnosticsCard
+                            if !engine.isBusy {
+                                instructionsCard
+                            }
                         }
 
                         testButton
@@ -142,8 +144,14 @@ struct ContentView: View {
     private var searchBar: some View {
         VStack(spacing: 8) {
             HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(.gray)
+                if isSearching {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                        .scaleEffect(0.7)
+                } else {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.gray)
+                }
                 TextField("Cari tujuan (nama tempat, jalan)...", text: $query)
                     .foregroundColor(.white)
                     .autocapitalization(.none)
@@ -171,8 +179,14 @@ struct ContentView: View {
 
                 Button(action: paste) {
                     HStack(spacing: 5) {
-                        Image(systemName: "doc.on.clipboard")
-                        Text("Tempel")
+                        if engine.isBusy {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(0.7)
+                        } else {
+                            Image(systemName: "doc.on.clipboard")
+                        }
+                        Text(engine.isBusy ? "Memuat" : "Tempel")
                     }
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.white)
@@ -181,6 +195,7 @@ struct ContentView: View {
                     .background(Color(red: 0.18, green: 0.34, blue: 0.24))
                     .cornerRadius(8)
                 }
+                .disabled(engine.isBusy)
             }
 
             Text("Dari Apple Maps: buka tempat → Bagikan → Salin → tekan Tempel")
@@ -243,38 +258,27 @@ struct ContentView: View {
         .cornerRadius(12)
     }
 
-    private var diagnosticsCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("DIAGNOSA")
-                    .font(.system(size: 10, weight: .bold))
-                    .tracking(1.2)
-                    .foregroundColor(Color(red: 0.6, green: 0.65, blue: 0.75))
-                Spacer()
-                Button(action: {
-                    UIPasteboard.general.string = engine.debugLines.joined(separator: "\n")
-                }) {
-                    Text("Salin log")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color(red: 0.2, green: 0.24, blue: 0.3))
-                        .cornerRadius(6)
-                }
-            }
+    private var loadingCard: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 1.0, green: 0.62, blue: 0.11)))
+                .scaleEffect(0.9)
 
-            ForEach(Array(engine.debugLines.enumerated()), id: \.offset) { _, line in
-                Text(line)
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundColor(Color(red: 0.6, green: 0.68, blue: 0.75))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text(engine.status)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(Color(red: 0.8, green: 0.84, blue: 0.9))
+                .lineLimit(1)
+
+            Spacer()
         }
-        .padding(12)
-        .background(Color(red: 0.09, green: 0.11, blue: 0.14))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Color(red: 0.12, green: 0.14, blue: 0.18))
         .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color(red: 1.0, green: 0.62, blue: 0.11).opacity(0.35), lineWidth: 1)
+        )
     }
 
     private var instructionsCard: some View {
@@ -402,13 +406,30 @@ struct ContentView: View {
     }
 
     private func search() {
-        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+
+        // A link (or "lat,lon") typed into the search field goes through the same parser
+        // as the paste button instead of being sent to MKLocalSearch verbatim.
+        if text.contains("http") || text.contains("://") || TargetParser.coordinate(from: text) != nil {
+            engine.transport = mode.transport
+            _ = engine.startFromText(text)
+            return
+        }
+
         isSearching = true
         let req = MKLocalSearch.Request()
-        req.naturalLanguageQuery = query
-        MKLocalSearch(request: req).start { resp, _ in
+        req.naturalLanguageQuery = text
+        MKLocalSearch(request: req).start { resp, error in
             isSearching = false
+            if let error {
+                engine.lastError = "Pencarian gagal: \(error.localizedDescription)"
+                return
+            }
             results = resp?.mapItems ?? []
+            if results.isEmpty {
+                engine.lastError = "Tidak ditemukan: \(text)"
+            }
         }
     }
 

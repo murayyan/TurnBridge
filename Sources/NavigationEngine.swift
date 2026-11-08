@@ -43,6 +43,8 @@ final class NavigationEngine: NSObject, ObservableObject {
     /// Set when the clipboard (or a typed link) could not be understood: the UI opens a
     /// manual paste sheet instead of leaving the button dead.
     @Published var needsManualInput = false
+    /// True while a search, link resolution or route calculation is in flight.
+    @Published var isBusy = false
     /// 1-based maneuver list of the current route, shown in the app so the user can see the
     /// turn-by-turn directions even before the first notification fires.
     @Published var steps: [String] = []
@@ -121,6 +123,7 @@ final class NavigationEngine: NSObject, ObservableObject {
         self.transport = transport
         status = "Menghitung rute…"
         lastError = nil
+        isBusy = true
         if source == nil { retryStage = 0 }
 
         let target = destination.placemark.coordinate
@@ -146,6 +149,7 @@ final class NavigationEngine: NSObject, ObservableObject {
                 }
                 guard let route = response?.routes.first else {
                     self.log("MapKit: 0 rute")
+                    self.isBusy = false
                     self.lastError = "Rute tidak ditemukan"
                     self.status = "Rute tidak ditemukan"
                     return
@@ -174,6 +178,7 @@ final class NavigationEngine: NSObject, ObservableObject {
             retryBySearch(destination, message: message)
             return
         }
+        isBusy = false
         status = "Rute gagal: \(message)"
     }
 
@@ -192,6 +197,7 @@ final class NavigationEngine: NSObject, ObservableObject {
                 guard let self else { return }
                 guard let item = response?.mapItems.first else {
                     self.log("cari ulang: 0 hasil")
+                    self.isBusy = false
                     self.lastError = message
                     self.status = "Rute gagal: \(message)"
                     return
@@ -261,6 +267,7 @@ final class NavigationEngine: NSObject, ObservableObject {
         }
         lastError = nil
         pendingDestination = nil
+        isBusy = false
         log("rute ok: \(built.count) langkah, \(String(format: "%.1f", km)) km")
 
         isRunning = true
@@ -295,6 +302,7 @@ final class NavigationEngine: NSObject, ObservableObject {
         arrived = false
         remainingText = ""
         pendingDestination = nil
+        isBusy = false
         if status == "Navigasi aktif" { status = "Siap" }
     }
 
@@ -471,11 +479,13 @@ final class NavigationEngine: NSObject, ObservableObject {
         return "\(rounded) m"
     }
 
+    /// Announced this far before the maneuver. iOS → Bluetooth → watch takes a few
+    /// seconds, so 170 m (≈10 s at 60 km/h) arrived too close to the turn.
     private var alertRadius: Double {
         switch transport {
-        case .walking: return 45
-        case .transit: return 90
-        default: return 170
+        case .walking: return 70
+        case .transit: return 150
+        default: return 350
         }
     }
 }
@@ -507,9 +517,15 @@ extension NavigationEngine: CLLocationManagerDelegate {
             return CLLocation(latitude: c.latitude, longitude: c.longitude)
         }
 
+        // Skip a maneuver only when it is really behind us (already announced or the GPS
+        // is on top of it). The old rule skipped a turn whenever the *next* point was
+        // geometrically closer, which swallowed alerts at tight intersections.
         var guardCount = 0
         while index + 1 < maneuvers.count, guardCount < maneuvers.count {
-            if location.distance(from: target(index + 1)) < location.distance(from: target(index)) {
+            let currentDistance = location.distance(from: target(index))
+            let nextDistance = location.distance(from: target(index + 1))
+            let passedCurrent = alerted.contains(index) || currentDistance <= 25
+            if nextDistance < currentDistance, passedCurrent {
                 index += 1
                 guardCount += 1
             } else {
@@ -527,7 +543,7 @@ extension NavigationEngine: CLLocationManagerDelegate {
 
         let isArrival = maneuver.arriving || index == maneuvers.count - 1
 
-        if distance <= (isArrival ? 120 : alertRadius), !alerted.contains(index), Date().timeIntervalSince(lastAlertAt) > 8 {
+        if distance <= (isArrival ? 150 : alertRadius), !alerted.contains(index), Date().timeIntervalSince(lastAlertAt) > 3 {
             alerted.insert(index)
             lastAlertAt = Date()
 

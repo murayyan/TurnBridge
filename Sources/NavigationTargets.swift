@@ -26,12 +26,14 @@ extension NavigationEngine {
 
         guard let query = target.query else {
             log("target: query kosong")
+            isBusy = false
             lastError = "Tujuan tidak terbaca dari link/teks"
             status = "Tujuan tidak terbaca"
             return
         }
 
         log("cari: \(query)")
+        isBusy = true
         status = "Mencari \(query)…"
         let request = MKLocalSearch.Request()
         request.naturalLanguageQuery = query
@@ -40,12 +42,14 @@ extension NavigationEngine {
                 guard let self else { return }
                 if let error {
                     self.log("cari gagal: \(error.localizedDescription)")
+                    self.isBusy = false
                     self.lastError = error.localizedDescription
                     self.status = "Pencarian gagal: \(error.localizedDescription)"
                     return
                 }
                 guard let item = response?.mapItems.first else {
                     self.log("cari: 0 hasil")
+                    self.isBusy = false
                     self.lastError = "Tidak ditemukan: \(query)"
                     self.status = "Tidak ditemukan: \(query)"
                     return

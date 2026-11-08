@@ -33,11 +33,13 @@ extension NavigationEngine {
         log("link: \(link.absoluteString.prefix(90))")
 
         if TargetParser.isShortLink(link) {
+            isBusy = true
             status = "Membuka link pendek…"
             resolve(link) { [weak self] resolved in
                 guard let self else { return }
                 guard let resolved else {
                     self.log("redirect: gagal")
+                    self.isBusy = false
                     self.lastError = "Link pendek tidak bisa dibuka — butuh internet"
                     self.status = "Link pendek gagal dibuka"
                     self.needsManualInput = true
@@ -64,11 +66,13 @@ extension NavigationEngine {
         clipboardPreview = String(trimmed.prefix(80)).replacingOccurrences(of: "\n", with: " ")
 
         if let link = TargetParser.firstURL(in: trimmed), TargetParser.isShortLink(link) {
+            isBusy = true
             status = "Membuka link pendek…"
             resolve(link) { [weak self] resolved in
                 guard let self else { return }
                 guard let resolved else {
                     self.log("redirect: gagal")
+                    self.isBusy = false
                     self.lastError = "Link pendek tidak bisa dibuka — butuh internet"
                     self.status = "Link pendek gagal dibuka"
                     return
@@ -81,6 +85,7 @@ extension NavigationEngine {
 
         guard let target = TargetParser.parse(trimmed) else {
             log("parse: gagal")
+            isBusy = false
             lastError = "Tidak terbaca — tempel link Apple/Google Maps"
             status = "Tidak terbaca — tempel link Apple/Google Maps"
             needsManualInput = true
@@ -96,6 +101,7 @@ extension NavigationEngine {
     private func finish(link: URL, text: String) -> Bool {
         guard let target = TargetParser.parse(url: link, fallbackText: text) else {
             log("parse: gagal")
+            isBusy = false
             lastError = "Link tidak berisi lokasi"
             status = "Link tidak berisi lokasi"
             needsManualInput = true
