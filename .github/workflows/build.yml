@@ -1,13 +1,13 @@
 name: Build TurnBridge IPA
 
+# macOS runners are queued/cancelled on free accounts, so this job only runs when
+# minutes are available. build_ipa.sh produces the same IPA locally without Xcode.
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-latest
 
     steps:
       - name: Checkout code
