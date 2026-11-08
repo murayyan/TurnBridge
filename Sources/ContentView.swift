@@ -136,12 +136,32 @@ struct ContentView: View {
             .background(Color(red: 0.14, green: 0.16, blue: 0.20))
             .cornerRadius(10)
 
-            Picker("Mode", selection: $mode) {
-                ForEach(TravelMode.allCases, id: \.self) { item in
-                    Text(item.label).tag(item)
+            HStack(spacing: 8) {
+                Picker("Mode", selection: $mode) {
+                    ForEach(TravelMode.allCases, id: \.self) { item in
+                        Text(item.label).tag(item)
+                    }
+                }
+                .pickerStyle(SegmentedPickerStyle())
+
+                Button(action: { _ = engine.startFromClipboard() }) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "doc.on.clipboard")
+                        Text("Tempel")
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(Color(red: 0.18, green: 0.34, blue: 0.24))
+                    .cornerRadius(8)
                 }
             }
-            .pickerStyle(SegmentedPickerStyle())
+
+            Text("Dari Apple Maps: buka tempat → Bagikan → Salin → tekan Tempel")
+                .font(.system(size: 10))
+                .foregroundColor(Color(red: 0.5, green: 0.55, blue: 0.65))
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

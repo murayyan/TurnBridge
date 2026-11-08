@@ -1,8 +1,6 @@
 import SwiftUI
 import UserNotifications
 
-/// Foreground notifications are suppressed unless a delegate opts in. Without this the
-/// test alert never reaches the lock screen (and therefore never reaches the watch).
 final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationHandler()
 
@@ -28,6 +26,9 @@ struct TurnBridgeApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(engine)
+                .onOpenURL { url in
+                    engine.handleURL(url)
+                }
         }
     }
 }
