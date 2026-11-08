@@ -148,10 +148,13 @@ final class NavigationEngine: NSObject, ObservableObject {
     // MARK: - Notifications
 
     func testNotification() {
-        notify(title: "TurnBridge", body: "Tes: belok kanan ke Jl. Contoh dalam 80 m")
+        // Delayed so the phone can be locked before the alert fires: a notification
+        // delivered while the app is frontmost is easy to miss, and the watch only
+        // mirrors what the lock screen actually showed.
+        notify(title: "TurnBridge", body: "Tes: belok kanan ke Jl. Contoh dalam 80 m", after: 5)
     }
 
-    private func notify(title: String, body: String) {
+    private func notify(title: String, body: String, after: TimeInterval = 0) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -159,7 +162,8 @@ final class NavigationEngine: NSObject, ObservableObject {
         if #available(iOS 15.0, *) {
             content.interruptionLevel = .timeSensitive
         }
-        center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+        let trigger = after > 0 ? UNTimeIntervalNotificationTrigger(timeInterval: after, repeats: false) : nil
+        center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger))
     }
 
     private static func clean(_ text: String) -> String {
