@@ -43,6 +43,13 @@ final class NavigationEngine: NSObject, ObservableObject {
     /// Set when the clipboard (or a typed link) could not be understood: the UI opens a
     /// manual paste sheet instead of leaving the button dead.
     @Published var needsManualInput = false
+    /// 1-based maneuver list of the current route, shown in the app so the user can see the
+    /// turn-by-turn directions even before the first notification fires.
+    @Published var steps: [String] = []
+    /// Last route/search error, kept separate from `status` so it can be shown in red.
+    @Published var lastError: String?
+    /// Rolling on-screen diagnostics: what was pasted, what was parsed, what MapKit answered.
+    @Published var debugLines: [String] = []
 
     private let manager = CLLocationManager()
     private let center = UNUserNotificationCenter.current()
@@ -52,9 +59,23 @@ final class NavigationEngine: NSObject, ObservableObject {
     private var index = 0
     private var lastAlertAt = Date.distantPast
     private var arrived = false
-    private var transport: MKDirectionsTransportType = .automobile
+    var transport: MKDirectionsTransportType = .automobile
     private var totalDistance: Double = 0
     private var totalTime: Double = 0
+    private var pendingDestination: MKMapItem?
+    private var retryStage = 0
+
+    func log(_ line: String) {
+        let stamp = Self.clock.string(from: Date())
+        debugLines.append("\(stamp) \(line)")
+        if debugLines.count > 14 { debugLines.removeFirst(debugLines.count - 14) }
+    }
+
+    private static let clock: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
 
     override init() {
         super.init()
@@ -95,13 +116,23 @@ final class NavigationEngine: NSObject, ObservableObject {
 
     // MARK: - Route
 
-    func start(destination: MKMapItem, transport: MKDirectionsTransportType) {
+    func start(destination: MKMapItem, transport: MKDirectionsTransportType, source: CLLocationCoordinate2D? = nil) {
         stop()
         self.transport = transport
         status = "Menghitung rute…"
+        lastError = nil
+        if source == nil { retryStage = 0 }
+
+        let target = destination.placemark.coordinate
+        log(String(format: "rute ke %@ @ %.5f,%.5f", destination.name ?? "-", target.latitude, target.longitude))
 
         let request = MKDirections.Request()
-        request.source = .forCurrentLocation()
+        if let source {
+            log(String(format: "sumber GPS @ %.5f,%.5f", source.latitude, source.longitude))
+            request.source = MKMapItem(placemark: MKPlacemark(coordinate: source))
+        } else {
+            request.source = .forCurrentLocation()
+        }
         request.destination = destination
         request.transportType = transport
         request.requestsAlternateRoutes = false
@@ -110,14 +141,67 @@ final class NavigationEngine: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 if let error {
-                    self.status = "Rute gagal: \(error.localizedDescription)"
+                    self.fail(error, destination: destination, hadSource: source != nil)
                     return
                 }
                 guard let route = response?.routes.first else {
+                    self.log("MapKit: 0 rute")
+                    self.lastError = "Rute tidak ditemukan"
                     self.status = "Rute tidak ditemukan"
                     return
                 }
                 self.load(route: route, destination: destination)
+            }
+        }
+    }
+
+    /// MKDirections with `.forCurrentLocation()` fails when the phone has no GPS fix yet
+    /// (a cold start or a fresh install). Ask for one location, then retry with an explicit
+    /// source coordinate instead of leaving the screen stuck at "Rute gagal".
+    private func fail(_ error: Error, destination: MKMapItem, hadSource: Bool) {
+        let message = error.localizedDescription
+        log("rute gagal: \(message)")
+        lastError = message
+        if !hadSource, retryStage == 0 {
+            retryStage = 1
+            pendingDestination = destination
+            status = "Menunggu GPS, lalu coba lagi…"
+            manager.requestLocation()
+            return
+        }
+        if retryStage < 2 {
+            retryStage = 2
+            retryBySearch(destination, message: message)
+            return
+        }
+        status = "Rute gagal: \(message)"
+    }
+
+    /// Last resort: a coordinate that MKDirections cannot route (middle of a building, a
+    /// closed road, a pin dropped in water) is searched again through MKLocalSearch, which
+    /// snaps it to the nearest routable place.
+    private func retryBySearch(_ destination: MKMapItem, message: String) {
+        let c = destination.placemark.coordinate
+        let query = String(format: "%.5f,%.5f", c.latitude, c.longitude)
+        log("cari ulang: \(query)")
+        status = "Cari ulang titik tujuan…"
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = query
+        MKLocalSearch(request: request).start { [weak self] response, _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard let item = response?.mapItems.first else {
+                    self.log("cari ulang: 0 hasil")
+                    self.lastError = message
+                    self.status = "Rute gagal: \(message)"
+                    return
+                }
+                self.log("cari ulang: \(item.name ?? "-")")
+                self.start(
+                    destination: item,
+                    transport: self.transport,
+                    source: self.manager.location?.coordinate
+                )
             }
         }
     }
@@ -172,6 +256,12 @@ final class NavigationEngine: NSObject, ObservableObject {
         nextInstruction = headline(for: built[0], distance: 0, includeDistance: false)
         nextDistance = ""
         remainingText = "Sisa \(format(distance: route.distance))"
+        steps = built.enumerated().map { offset, maneuver in
+            "\(offset + 1). \(stepText(for: maneuver))"
+        }
+        lastError = nil
+        pendingDestination = nil
+        log("rute ok: \(built.count) langkah, \(String(format: "%.1f", km)) km")
 
         isRunning = true
         manager.startUpdatingLocation()
@@ -181,13 +271,30 @@ final class NavigationEngine: NSObject, ObservableObject {
         )
     }
 
+    /// One line per route step, e.g. "2. Belok kanan ke Jl. X • 300 m".
+    private func stepText(for maneuver: Maneuver) -> String {
+        switch maneuver.kind {
+        case .arrive:
+            let place = maneuver.street.map { " di \($0)" } ?? ""
+            return "Tiba\(place)"
+        case .straight:
+            let street = maneuver.street.map { " ke \($0)" } ?? ""
+            return "Lurus sejauh \(format(distance: maneuver.stepDistance))\(street)"
+        default:
+            let title = headline(for: maneuver, distance: 0, includeDistance: false)
+            return maneuver.stepDistance > 0 ? "\(title) • \(format(distance: maneuver.stepDistance))" : title
+        }
+    }
+
     func stop() {
         manager.stopUpdatingLocation()
         isRunning = false
         maneuvers = []
+        steps = []
         index = 0
         arrived = false
         remainingText = ""
+        pendingDestination = nil
         if status == "Navigasi aktif" { status = "Siap" }
     }
 
@@ -384,7 +491,16 @@ extension NavigationEngine: CLLocationManagerDelegate {
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard isRunning, !arrived, let location = locations.last, index < maneuvers.count else { return }
+        guard let location = locations.last else { return }
+
+        if let pending = pendingDestination {
+            log(String(format: "GPS fix: %.5f,%.5f, ulang hitung", location.coordinate.latitude, location.coordinate.longitude))
+            pendingDestination = nil
+            start(destination: pending, transport: transport, source: location.coordinate)
+            return
+        }
+
+        guard isRunning, !arrived, index < maneuvers.count else { return }
 
         func target(_ i: Int) -> CLLocation {
             let c = maneuvers[i].coordinate
@@ -437,6 +553,11 @@ extension NavigationEngine: CLLocationManagerDelegate {
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        log("gps: \(error.localizedDescription)")
+        if pendingDestination != nil {
+            pendingDestination = nil
+            lastError = "GPS tidak tersedia: \(error.localizedDescription)"
+        }
         status = "GPS error: \(error.localizedDescription)"
     }
 }

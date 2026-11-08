@@ -27,92 +27,35 @@ struct ContentView: View {
             ZStack {
                 Color(red: 0.07, green: 0.08, blue: 0.10).ignoresSafeArea()
 
-                VStack(spacing: 16) {
-                    header
-                    activeCard
-                    searchBar
+                ScrollView {
+                    VStack(spacing: 14) {
+                        header
+                        activeCard
+                        searchBar
 
-                    if !results.isEmpty {
-                        resultList
-                    } else {
-                        Spacer()
-                        instructionsCard
-                        Spacer()
+                        if !results.isEmpty {
+                            resultList
+                        } else {
+                            if !engine.steps.isEmpty {
+                                stepsCard
+                            }
+                            instructionsCard
+                        }
+
+                        if engine.lastError != nil || !engine.debugLines.isEmpty {
+                            diagnosticsCard
+                        }
+
+                        testButton
                     }
-
-                    testButton
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 12)
             }
             .navigationBarHidden(true)
         }
         .sheet(isPresented: $engine.needsManualInput) {
             manualPasteSheet
-        }
-    }
-
-    private var manualPasteSheet: some View {
-        NavigationView {
-            ZStack {
-                Color(red: 0.07, green: 0.08, blue: 0.10).ignoresSafeArea()
-
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("Tempel link atau nama tempat")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(.white)
-
-                    Text("Di Apple Maps: buka tempat → Bagikan → Salin. Kalau tombol Tempel tidak membaca apa pun, tempel manual di sini.")
-                        .font(.system(size: 12))
-                        .foregroundColor(Color(red: 0.65, green: 0.7, blue: 0.78))
-                        .lineSpacing(3)
-
-                    TextEditor(text: $manualText)
-                        .font(.system(size: 13, design: .monospaced))
-                        .foregroundColor(.white)
-                        .frame(height: 120)
-                        .padding(8)
-                        .background(Color(red: 0.14, green: 0.16, blue: 0.20))
-                        .cornerRadius(10)
-
-                    if !engine.clipboardPreview.isEmpty {
-                        Text("Terbaca: \(engine.clipboardPreview)")
-                            .font(.system(size: 10))
-                            .foregroundColor(Color(red: 0.55, green: 0.6, blue: 0.68))
-                    }
-
-                    Button(action: {
-                        engine.startFromText(manualText)
-                    }) {
-                        Text("Mulai Navigasi")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.black)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 11)
-                            .background(Color(red: 1.0, green: 0.62, blue: 0.11))
-                            .cornerRadius(10)
-                    }
-
-                    Button(action: { manualText = UIPasteboard.general.string ?? "" }) {
-                        Text("Ambil dari clipboard")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 9)
-                            .background(Color(red: 0.18, green: 0.34, blue: 0.24))
-                            .cornerRadius(10)
-                    }
-
-                    Spacer()
-                }
-                .padding(18)
-            }
-            .navigationBarHidden(true)
-            .onAppear {
-                if manualText.isEmpty {
-                    manualText = UIPasteboard.general.string ?? ""
-                }
-            }
         }
     }
 
@@ -146,6 +89,13 @@ struct ContentView: View {
                         .font(.system(size: 11))
                         .foregroundColor(Color(red: 0.6, green: 0.65, blue: 0.75))
                 }
+            }
+
+            if let error = engine.lastError {
+                Text(error)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(Color(red: 1.0, green: 0.45, blue: 0.42))
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if engine.isRunning {
@@ -219,7 +169,7 @@ struct ContentView: View {
                 }
                 .pickerStyle(SegmentedPickerStyle())
 
-                Button(action: { _ = engine.startFromClipboard() }) {
+                Button(action: paste) {
                     HStack(spacing: 5) {
                         Image(systemName: "doc.on.clipboard")
                         Text("Tempel")
@@ -241,32 +191,90 @@ struct ContentView: View {
     }
 
     private var resultList: some View {
-        ScrollView {
-            LazyVStack(spacing: 8) {
-                ForEach(results, id: \.self) { item in
-                    Button(action: { start(item) }) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(item.name ?? "Tujuan")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(.white)
-                                Text(item.placemark.title ?? "")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.gray)
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                            Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
-                                .font(.system(size: 22))
-                                .foregroundColor(Color(red: 1.0, green: 0.62, blue: 0.11))
+        LazyVStack(spacing: 8) {
+            ForEach(results, id: \.self) { item in
+                Button(action: { start(item) }) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(item.name ?? "Tujuan")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                            Text(item.placemark.title ?? "")
+                                .font(.system(size: 11))
+                                .foregroundColor(.gray)
+                                .lineLimit(1)
                         }
-                        .padding(12)
-                        .background(Color(red: 0.14, green: 0.16, blue: 0.20))
-                        .cornerRadius(10)
+                        Spacer()
+                        Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundColor(Color(red: 1.0, green: 0.62, blue: 0.11))
                     }
+                    .padding(12)
+                    .background(Color(red: 0.14, green: 0.16, blue: 0.20))
+                    .cornerRadius(10)
                 }
             }
         }
+    }
+
+    private var stepsCard: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text("RUTE")
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundColor(Color(red: 0.6, green: 0.65, blue: 0.75))
+                Spacer()
+                Text("\(engine.steps.count) langkah")
+                    .font(.system(size: 10))
+                    .foregroundColor(Color(red: 0.5, green: 0.55, blue: 0.65))
+            }
+
+            ForEach(Array(engine.steps.enumerated()), id: \.offset) { _, step in
+                Text(step)
+                    .font(.system(size: 12))
+                    .foregroundColor(Color(red: 0.85, green: 0.87, blue: 0.9))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .background(Color(red: 0.11, green: 0.13, blue: 0.17))
+        .cornerRadius(12)
+    }
+
+    private var diagnosticsCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("DIAGNOSA")
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundColor(Color(red: 0.6, green: 0.65, blue: 0.75))
+                Spacer()
+                Button(action: {
+                    UIPasteboard.general.string = engine.debugLines.joined(separator: "\n")
+                }) {
+                    Text("Salin log")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color(red: 0.2, green: 0.24, blue: 0.3))
+                        .cornerRadius(6)
+                }
+            }
+
+            ForEach(Array(engine.debugLines.enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .font(.system(size: 9.5, design: .monospaced))
+                    .foregroundColor(Color(red: 0.6, green: 0.68, blue: 0.75))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .background(Color(red: 0.09, green: 0.11, blue: 0.14))
+        .cornerRadius(10)
     }
 
     private var instructionsCard: some View {
@@ -307,6 +315,90 @@ struct ContentView: View {
             .background(Color(red: 1.0, green: 0.62, blue: 0.11))
             .cornerRadius(10)
         }
+    }
+
+    private var manualPasteSheet: some View {
+        NavigationView {
+            ZStack {
+                Color(red: 0.07, green: 0.08, blue: 0.10).ignoresSafeArea()
+
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Tempel link atau nama tempat")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(.white)
+
+                    Text("Di Apple Maps: buka tempat → Bagikan → Salin. Kalau tombol Tempel tidak membaca apa pun, tempel manual di sini.")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color(red: 0.65, green: 0.7, blue: 0.78))
+                        .lineSpacing(3)
+
+                    TextEditor(text: $manualText)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundColor(.white)
+                        .frame(height: 120)
+                        .padding(8)
+                        .background(Color(red: 0.14, green: 0.16, blue: 0.20))
+                        .cornerRadius(10)
+
+                    if !engine.clipboardPreview.isEmpty {
+                        Text("Terbaca: \(engine.clipboardPreview)")
+                            .font(.system(size: 10))
+                            .foregroundColor(Color(red: 0.55, green: 0.6, blue: 0.68))
+                    }
+
+                    if let error = engine.lastError {
+                        Text(error)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(Color(red: 1.0, green: 0.45, blue: 0.42))
+                    }
+
+                    Button(action: {
+                        engine.transport = mode.transport
+                        engine.startFromText(manualText)
+                    }) {
+                        Text("Mulai Navigasi")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                            .background(Color(red: 1.0, green: 0.62, blue: 0.11))
+                            .cornerRadius(10)
+                    }
+
+                    Button(action: { manualText = UIPasteboard.general.string ?? "" }) {
+                        Text("Ambil dari clipboard")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(Color(red: 0.18, green: 0.34, blue: 0.24))
+                            .cornerRadius(10)
+                    }
+
+                    Button(action: { engine.needsManualInput = false }) {
+                        Text("Tutup")
+                            .font(.system(size: 12))
+                            .foregroundColor(Color(red: 0.6, green: 0.65, blue: 0.75))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                    }
+
+                    Spacer()
+                }
+                .padding(18)
+            }
+            .navigationBarHidden(true)
+            .onAppear {
+                if manualText.isEmpty {
+                    manualText = UIPasteboard.general.string ?? ""
+                }
+            }
+        }
+    }
+
+    private func paste() {
+        engine.transport = mode.transport
+        _ = engine.startFromClipboard()
     }
 
     private func search() {

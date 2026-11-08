@@ -47,7 +47,7 @@ enum TargetParser {
         }
 
         // `coordinate` is the parameter Apple Maps uses when sharing a single place.
-        let coordinateText = value(["coordinate", "ll", "sll", "center", "daddr", "destination", "q", "o"])
+        let coordinateText = value(["coordinate", "ll", "sll", "center", "daddr", "destination", "q", "query", "o"])
         let coordinate = coordinateText.flatMap(TargetParser.coordinate(from:)) ?? coordinateFromPath(url)
 
         // Apple share text is "Place name\nStreet address\nhttps://maps.apple.com/place?..",
@@ -56,7 +56,7 @@ enum TargetParser {
         let rawName = value(["name"])
             ?? urlName(url)
             ?? fallbackName
-            ?? value(["q", "dname", "destination", "address"])
+            ?? value(["q", "query", "daddr", "dname", "destination", "address"])
 
         // `?q=-6.2,106.8` is a coordinate, not a place name.
         let name = rawName.flatMap { TargetParser.coordinate(from: $0) == nil ? $0 : nil }

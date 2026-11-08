@@ -23,16 +23,20 @@ extension NavigationEngine {
 
         let preview = raw.isEmpty ? (url?.absoluteString ?? "") : raw
         clipboardPreview = String(preview.prefix(80)).replacingOccurrences(of: "\n", with: " ")
+        log("tempel: \(clipboardPreview)")
 
         guard let link = url ?? TargetParser.firstURL(in: raw) else {
             // Plain text: treat it as a place name and let MapKit search it.
             return startFromText(raw)
         }
 
+        log("link: \(link.absoluteString.prefix(90))")
+
         if TargetParser.isShortLink(link) {
             status = "Membuka link pendek…"
             resolve(link) { [weak self] resolved in
                 guard let self else { return }
+                self.log("redirect: \((resolved ?? link).absoluteString.prefix(90))")
                 self.finish(link: resolved ?? link, text: raw)
             }
             return true
@@ -62,10 +66,13 @@ extension NavigationEngine {
         }
 
         guard let target = TargetParser.parse(trimmed) else {
+            log("parse: gagal")
+            lastError = "Tidak terbaca — tempel link Apple/Google Maps"
             status = "Tidak terbaca — tempel link Apple/Google Maps"
             needsManualInput = true
             return false
         }
+        log("parse: \(target.coordinate == nil ? "nama" : "koordinat") \(target.name ?? "-")")
         needsManualInput = false
         open(target)
         return true
@@ -74,10 +81,13 @@ extension NavigationEngine {
     @discardableResult
     private func finish(link: URL, text: String) -> Bool {
         guard let target = TargetParser.parse(url: link, fallbackText: text) else {
+            log("parse: gagal")
+            lastError = "Link tidak berisi lokasi"
             status = "Link tidak berisi lokasi"
             needsManualInput = true
             return false
         }
+        log("parse: \(target.coordinate == nil ? "nama" : "koordinat") \(target.name ?? "-")")
         needsManualInput = false
         open(target)
         return true
