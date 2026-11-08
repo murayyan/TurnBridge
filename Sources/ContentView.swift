@@ -1,5 +1,6 @@
 import SwiftUI
 import MapKit
+import UIKit
 
 enum TravelMode: String, CaseIterable, Hashable {
     case car, walk
@@ -19,6 +20,7 @@ struct ContentView: View {
     @State private var results: [MKMapItem] = []
     @State private var isSearching = false
     @State private var mode: TravelMode = .car
+    @State private var manualText: String = ""
 
     var body: some View {
         NavigationView {
@@ -44,6 +46,73 @@ struct ContentView: View {
                 .padding(.vertical, 12)
             }
             .navigationBarHidden(true)
+        }
+        .sheet(isPresented: $engine.needsManualInput) {
+            manualPasteSheet
+        }
+    }
+
+    private var manualPasteSheet: some View {
+        NavigationView {
+            ZStack {
+                Color(red: 0.07, green: 0.08, blue: 0.10).ignoresSafeArea()
+
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Tempel link atau nama tempat")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(.white)
+
+                    Text("Di Apple Maps: buka tempat → Bagikan → Salin. Kalau tombol Tempel tidak membaca apa pun, tempel manual di sini.")
+                        .font(.system(size: 12))
+                        .foregroundColor(Color(red: 0.65, green: 0.7, blue: 0.78))
+                        .lineSpacing(3)
+
+                    TextEditor(text: $manualText)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundColor(.white)
+                        .frame(height: 120)
+                        .padding(8)
+                        .background(Color(red: 0.14, green: 0.16, blue: 0.20))
+                        .cornerRadius(10)
+
+                    if !engine.clipboardPreview.isEmpty {
+                        Text("Terbaca: \(engine.clipboardPreview)")
+                            .font(.system(size: 10))
+                            .foregroundColor(Color(red: 0.55, green: 0.6, blue: 0.68))
+                    }
+
+                    Button(action: {
+                        engine.startFromText(manualText)
+                    }) {
+                        Text("Mulai Navigasi")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                            .background(Color(red: 1.0, green: 0.62, blue: 0.11))
+                            .cornerRadius(10)
+                    }
+
+                    Button(action: { manualText = UIPasteboard.general.string ?? "" }) {
+                        Text("Ambil dari clipboard")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(Color(red: 0.18, green: 0.34, blue: 0.24))
+                            .cornerRadius(10)
+                    }
+
+                    Spacer()
+                }
+                .padding(18)
+            }
+            .navigationBarHidden(true)
+            .onAppear {
+                if manualText.isEmpty {
+                    manualText = UIPasteboard.general.string ?? ""
+                }
+            }
         }
     }
 

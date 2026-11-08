@@ -37,6 +37,12 @@ final class NavigationEngine: NSObject, ObservableObject {
     @Published var summary: String = ""
     @Published var isRunning = false
     @Published var authorizationText: String = ""
+    /// First 80 characters of whatever was on the pasteboard, shown so the user can see
+    /// what TurnBridge actually received when parsing fails.
+    @Published var clipboardPreview: String = ""
+    /// Set when the clipboard (or a typed link) could not be understood: the UI opens a
+    /// manual paste sheet instead of leaving the button dead.
+    @Published var needsManualInput = false
 
     private let manager = CLLocationManager()
     private let center = UNUserNotificationCenter.current()

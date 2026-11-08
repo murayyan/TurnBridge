@@ -9,9 +9,14 @@ struct ParsedTarget {
     let query: String?
 }
 
-/// Accepts what Apple Maps / Google Maps actually put on the clipboard or in a share link:
-/// `maps.apple.com/?q=..&ll=..&daddr=..`, `google.com/maps/place/Name/@lat,lon,17z`,
-/// `comgooglemaps://?daddr=lat,lon`, a bare `lat,lon`, or just a place name.
+/// Handles what Apple Maps and Google Maps actually hand over:
+///
+/// - `maps.apple.com/place?address=..&coordinate=-6.2,106.8&name=Cafe` (iOS 16+ share)
+/// - `maps.apple.com/?q=Cafe&ll=-6.2,106.8`, `?daddr=..`, `?saddr=..`
+/// - `google.com/maps/place/Name/@-6.2,106.8,17z`, `?q=lat,lon`, `?ll=..`
+/// - `comgooglemaps://?daddr=lat,lon`
+/// - `maps.app.goo.gl/xxxx` (short link, resolved over the network)
+/// - a bare `lat,lon`, or just a place name
 enum TargetParser {
     static func parse(_ raw: String) -> ParsedTarget? {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -24,14 +29,16 @@ enum TargetParser {
         guard let url = firstURL(in: text) else {
             return ParsedTarget(coordinate: nil, name: text, query: text)
         }
+        return parse(url: url, fallbackText: text)
+    }
 
-        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        let items = components?.queryItems ?? []
+    static func parse(url: URL, fallbackText: String? = nil) -> ParsedTarget? {
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
 
         func value(_ names: [String]) -> String? {
             for name in names {
                 if let item = items.first(where: { $0.name.lowercased() == name }),
-                   let value = item.value,
+                   let value = item.value?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !value.isEmpty {
                     return value
                 }
@@ -39,33 +46,42 @@ enum TargetParser {
             return nil
         }
 
-        let rawLabel = value(["name", "q", "dname", "destination"])
+        // `coordinate` is the parameter Apple Maps uses when sharing a single place.
+        let coordinateText = value(["coordinate", "ll", "sll", "center", "daddr", "destination", "q", "o"])
+        let coordinate = coordinateText.flatMap(TargetParser.coordinate(from:)) ?? coordinateFromPath(url)
+
+        // Apple share text is "Place name\nStreet address\nhttps://maps.apple.com/place?..",
+        // so the first line beats the generic `address` parameter.
+        let fallbackName = fallbackText.flatMap(firstMeaningfulLine)
+        let rawName = value(["name"])
             ?? urlName(url)
-            ?? value(["address"])
+            ?? fallbackName
+            ?? value(["q", "dname", "destination", "address"])
+
         // `?q=-6.2,106.8` is a coordinate, not a place name.
-        let label = rawLabel.flatMap { TargetParser.coordinate(from: $0) == nil ? $0 : nil }
+        let name = rawName.flatMap { TargetParser.coordinate(from: $0) == nil ? $0 : nil }
 
-        // daddr / destination are either "lat,lon" or a full address string.
-        var coordinate: CLLocationCoordinate2D?
-        if let daddr = value(["daddr", "destination"]), let parsed = TargetParser.coordinate(from: daddr) {
-            coordinate = parsed
+        if let coordinate {
+            return ParsedTarget(coordinate: coordinate, name: name, query: nil)
         }
-        if coordinate == nil, let ll = value(["ll", "sll", "center", "q"]).flatMap(TargetParser.coordinate(from:)) {
-            coordinate = ll
+        if let name {
+            return ParsedTarget(coordinate: nil, name: name, query: name)
         }
-        if coordinate == nil, let path = TargetParser.coordinateFromPath(url) {
-            coordinate = path
+        if let fallbackName {
+            return ParsedTarget(coordinate: nil, name: fallbackName, query: fallbackName)
         }
-
-        if coordinate == nil, let query = label, !query.isEmpty {
-            return ParsedTarget(coordinate: nil, name: query, query: query)
-        }
-        guard coordinate != nil || label != nil else { return nil }
-        return ParsedTarget(coordinate: coordinate, name: label, query: nil)
+        return nil
     }
 
-    private static func firstURL(in text: String) -> URL? {
-        if let url = URL(string: text), url.scheme != nil { return url }
+    /// `maps.app.goo.gl/..`, `goo.gl/maps/..`
+    static func isShortLink(_ url: URL) -> Bool {
+        guard var host = url.host?.lowercased() else { return false }
+        if host.hasPrefix("www.") { host.removeFirst(4) }
+        return host == "goo.gl" || host.hasSuffix(".goo.gl") || host == "g.co"
+    }
+
+    static func firstURL(in text: String) -> URL? {
+        if let url = URL(string: text), url.scheme != nil, url.host != nil { return url }
         let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
         let range = NSRange(text.startIndex..., in: text)
         guard let match = detector?.firstMatch(in: text, options: [], range: range),
@@ -86,6 +102,15 @@ enum TargetParser {
               abs(lat) <= 90,
               abs(lon) <= 180 else { return nil }
         return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
+    private static func firstMeaningfulLine(_ text: String) -> String? {
+        for line in text.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty || trimmed.lowercased().contains("http") { continue }
+            return trimmed
+        }
+        return nil
     }
 
     /// Google puts the map centre in the path: `/maps/place/Name/@-6.2,106.8,17z`

@@ -22,6 +22,20 @@ Tidak ada server, tidak ada akun, tidak ada data keluar dari HP.
 - iPhone: `Pengaturan > Bluetooth > (i) Watch Fit 3 > Share System Notifications` ON
 - Aplikasi: Lokasi **Selalu**, Notifikasi diizinkan
 
+## Ambil tujuan dari Apple Maps
+
+1. Apple Maps: cari tempat → ketuk → **Bagikan** → **Salin**.
+2. Buka TurnBridge → **Tempel**. Rute langsung dihitung.
+3. Kalau muncul dialog *Allow Paste*, pilih **Allow**.
+
+Yang dikenali: link `maps.apple.com/place?...&coordinate=..&name=..` (format Share iOS 16+),
+teks share multi-baris, `maps.apple.com/?q=..&ll=..`, `?daddr=..`, link
+`google.com/maps/place/Nama/@lat,lon,17z`, link pendek `maps.app.goo.gl/..`
+(diikuti redirect-nya), `comgooglemaps://?daddr=..`, `lat,lon`, atau nama tempat saja.
+
+Kalau clipboard tidak terbaca, aplikasi membuka **sheet tempel manual** berisi teks mentah
+clipboard — tempel/rapikan di situ lalu tekan **Mulai Navigasi**.
+
 ## Build
 
 ### A. GitHub Actions (tanpa Xcode)

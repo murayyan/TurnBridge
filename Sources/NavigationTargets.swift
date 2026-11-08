@@ -5,11 +5,12 @@ import MapKit
 extension NavigationEngine {
     /// `turnbridge://route?daddr=-6.2,106.8&name=Cafe`
     func handleURL(_ url: URL) {
-        let text = url.absoluteString
-        guard let target = TargetParser.parse(text) else {
+        guard let target = TargetParser.parse(url: url) else {
             status = "Link tidak dikenali"
+            needsManualInput = true
             return
         }
+        needsManualInput = false
         open(target)
     }
 
