@@ -3,21 +3,37 @@ import CoreLocation
 import MapKit
 import UserNotifications
 
-/// One navigation step: the point where the maneuver happens and what to do there.
+enum ManeuverKind: Equatable {
+    case straight
+    case turnRight
+    case turnLeft
+    case sharpRight
+    case sharpLeft
+    case slightRight
+    case slightLeft
+    case uTurn
+    case roundabout(Int)
+    case ramp
+    case merge
+    case arrive
+    case other
+}
+
 struct Maneuver {
     let coordinate: CLLocationCoordinate2D
-    let instruction: String
+    let kind: ManeuverKind
+    let street: String?
+    let raw: String
+    let stepDistance: Double
     let distanceFromStart: Double
     let arriving: Bool
 }
 
-/// Drives route calculation, background location updates and the turn notifications the
-/// phone mirrors to the watch. Not an @MainActor type: CoreLocation calls the delegate on
-/// the main queue, and the published values are updated there explicitly.
 final class NavigationEngine: NSObject, ObservableObject {
     @Published var status: String = "Siap"
     @Published var nextInstruction: String = "—"
     @Published var nextDistance: String = ""
+    @Published var remainingText: String = ""
     @Published var summary: String = ""
     @Published var isRunning = false
     @Published var authorizationText: String = ""
@@ -31,6 +47,8 @@ final class NavigationEngine: NSObject, ObservableObject {
     private var lastAlertAt = Date.distantPast
     private var arrived = false
     private var transport: MKDirectionsTransportType = .automobile
+    private var totalDistance: Double = 0
+    private var totalTime: Double = 0
 
     override init() {
         super.init()
@@ -53,7 +71,6 @@ final class NavigationEngine: NSObject, ObservableObject {
         case .notDetermined:
             manager.requestWhenInUseAuthorization()
         case .authorizedWhenInUse:
-            // Background navigation needs "Always"; iOS answers with a provisional grant.
             manager.requestAlwaysAuthorization()
         default:
             break
@@ -101,21 +118,37 @@ final class NavigationEngine: NSObject, ObservableObject {
 
     private func load(route: MKRoute, destination: MKMapItem) {
         var built: [Maneuver] = []
-        for (offset, step) in route.steps.enumerated() {
-            let points = step.polyline.coordinates
-            guard let point = points.first, !step.instructions.isEmpty else { continue }
+        var cumulative: Double = 0
+
+        for step in route.steps {
+            defer { cumulative += step.distance }
+            guard let point = step.polyline.coordinates.first, !step.instructions.isEmpty else { continue }
+            let kind = Self.classify(step.instructions)
             built.append(
                 Maneuver(
                     coordinate: point,
-                    instruction: Self.clean(step.instructions),
-                    distanceFromStart: 0,
-                    arriving: offset == route.steps.count - 1
+                    kind: kind,
+                    street: Self.streetName(from: step.instructions),
+                    raw: Self.clean(step.instructions),
+                    stepDistance: step.distance,
+                    distanceFromStart: cumulative,
+                    arriving: kind == .arrive
                 )
             )
         }
-        // Guard against routes without usable steps: still alert at the destination.
+
         if built.isEmpty {
-            built = [Maneuver(coordinate: destination.placemark.coordinate, instruction: "Sampai di tujuan", distanceFromStart: 0, arriving: true)]
+            built = [
+                Maneuver(
+                    coordinate: destination.placemark.coordinate,
+                    kind: .arrive,
+                    street: destination.name,
+                    raw: "Sampai di tujuan",
+                    stepDistance: 0,
+                    distanceFromStart: 0,
+                    arriving: true
+                )
+            ]
         }
 
         maneuvers = built
@@ -123,17 +156,23 @@ final class NavigationEngine: NSObject, ObservableObject {
         index = 0
         arrived = false
         lastAlertAt = .distantPast
+        totalDistance = route.distance
+        totalTime = route.expectedTravelTime
 
         let km = route.distance / 1000
         let minutes = Int((route.expectedTravelTime / 60).rounded())
         summary = String(format: "%.1f km • %d mnt • %d belokan", km, minutes, max(0, built.count - 1))
         status = "Navigasi aktif"
-        nextInstruction = built.first?.instruction ?? "—"
+        nextInstruction = headline(for: built[0], distance: 0, includeDistance: false)
         nextDistance = ""
+        remainingText = "Sisa \(format(distance: route.distance))"
 
         isRunning = true
         manager.startUpdatingLocation()
-        notify(title: "Navigasi dimulai", body: "\(summary). Layar boleh dikunci.")
+        notify(
+            title: "Navigasi dimulai",
+            body: "Sisa \(format(distance: route.distance)) lagi sampai tujuan • ±\(minutes) mnt"
+        )
     }
 
     func stop() {
@@ -142,16 +181,85 @@ final class NavigationEngine: NSObject, ObservableObject {
         maneuvers = []
         index = 0
         arrived = false
+        remainingText = ""
         if status == "Navigasi aktif" { status = "Siap" }
+    }
+
+    // MARK: - Wording Formatters
+
+    /// Judul Notifikasi:
+    /// - "Belok kanan dalam 80 m" / "Belok kanan ke Jl. Sudirman dalam 80 m"
+    /// - "Lurus sejauh 1,2 km"
+    /// - "Tiba di tujuan"
+    private func headline(for maneuver: Maneuver, distance: Double, includeDistance: Bool = true) -> String {
+        switch maneuver.kind {
+        case .arrive:
+            return "Tiba di tujuan"
+
+        case .straight:
+            var text = "Lurus sejauh \(format(distance: maneuver.stepDistance))"
+            if let street = maneuver.street { text += " ke \(street)" }
+            return text
+
+        case .roundabout(let exit):
+            let text = "Bundaran, ambil exit ke-\(exit)" + (maneuver.street.map { " ke \($0)" } ?? "")
+            return withDistance(text, distance, includeDistance)
+
+        case .turnRight:
+            return withDistance(withStreet("Belok kanan", maneuver.street), distance, includeDistance)
+        case .turnLeft:
+            return withDistance(withStreet("Belok kiri", maneuver.street), distance, includeDistance)
+        case .sharpRight:
+            return withDistance(withStreet("Belok tajam kanan", maneuver.street), distance, includeDistance)
+        case .sharpLeft:
+            return withDistance(withStreet("Belok tajam kiri", maneuver.street), distance, includeDistance)
+        case .slightRight:
+            return withDistance(withStreet("Agak ke kanan", maneuver.street), distance, includeDistance)
+        case .slightLeft:
+            return withDistance(withStreet("Agak ke kiri", maneuver.street), distance, includeDistance)
+        case .uTurn:
+            return withDistance("Putar balik", distance, includeDistance)
+        case .ramp:
+            return withDistance(withStreet("Ambil jalur", maneuver.street), distance, includeDistance)
+        case .merge:
+            return withDistance(withStreet("Gabung jalur", maneuver.street), distance, includeDistance)
+        case .other:
+            let base = maneuver.raw.isEmpty ? "Lanjutkan" : maneuver.raw
+            return withDistance(base, distance, includeDistance)
+        }
+    }
+
+    private func withStreet(_ base: String, _ street: String?) -> String {
+        guard let street, !street.isEmpty else { return base }
+        return "\(base) ke \(street)"
+    }
+
+    private func withDistance(_ text: String, _ distance: Double, _ include: Bool) -> String {
+        guard include, distance > 0 else { return text }
+        return "\(text) dalam \(format(distance: distance))"
+    }
+
+    /// Deskripsi Notifikasi:
+    /// Memberikan informasi sisa jarak dan perkiraan menit sampai tujuan
+    /// Contoh: "Sisa 3,4 km lagi sampai tujuan • ±8 mnt"
+    private func detail(for maneuver: Maneuver, distance: Double) -> String {
+        let remaining = max(0, totalDistance - maneuver.distanceFromStart + distance)
+        var text = "Sisa \(format(distance: remaining)) lagi sampai tujuan"
+        if totalDistance > 0, totalTime > 0 {
+            let minutes = Int((totalTime * remaining / totalDistance / 60).rounded())
+            if minutes > 0 { text += " • ±\(minutes) mnt" }
+        }
+        return text
     }
 
     // MARK: - Notifications
 
     func testNotification() {
-        // Delayed so the phone can be locked before the alert fires: a notification
-        // delivered while the app is frontmost is easy to miss, and the watch only
-        // mirrors what the lock screen actually showed.
-        notify(title: "TurnBridge", body: "Tes: belok kanan ke Jl. Contoh dalam 80 m", after: 5)
+        notify(
+            title: "Belok kanan ke Jl. Sudirman dalam 80 m",
+            body: "Sisa 3,4 km lagi sampai tujuan • ±8 mnt",
+            after: 5
+        )
     }
 
     private func notify(title: String, body: String, after: TimeInterval = 0) {
@@ -166,6 +274,77 @@ final class NavigationEngine: NSObject, ObservableObject {
         center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger))
     }
 
+    // MARK: - Parsing
+
+    static func classify(_ instruction: String) -> ManeuverKind {
+        let text = instruction.lowercased()
+
+        if text.contains("arrive") || text.contains("tiba") || text.contains("sampai di tujuan") {
+            return .arrive
+        }
+        if text.contains("roundabout") || text.contains("bundaran") {
+            return .roundabout(roundaboutExit(text))
+        }
+        if text.contains("u-turn") || text.contains("uturn") || text.contains("putar balik") {
+            return .uTurn
+        }
+        if text.contains("sharp right") || text.contains("tajam kanan") {
+            return .sharpRight
+        }
+        if text.contains("sharp left") || text.contains("tajam kiri") {
+            return .sharpLeft
+        }
+        if text.contains("slight right") || text.contains("keep right") || text.contains("bear right") || text.contains("agak ke kanan") {
+            return .slightRight
+        }
+        if text.contains("slight left") || text.contains("keep left") || text.contains("bear left") || text.contains("agak ke kiri") {
+            return .slightLeft
+        }
+        if text.contains("turn right") || text.contains("belok kanan") {
+            return .turnRight
+        }
+        if text.contains("turn left") || text.contains("belok kiri") {
+            return .turnLeft
+        }
+        if text.contains("take the ramp") || text.contains("exit") || text.contains("ambil jalur") {
+            return .ramp
+        }
+        if text.contains("merge") || text.contains("gabung") {
+            return .merge
+        }
+        if text.contains("head") || text.contains("continue") || text.contains("go straight")
+            || text.contains("lurus") || text.contains("terus") || text.contains("lanjut") {
+            return .straight
+        }
+        return .other
+    }
+
+    private static func roundaboutExit(_ text: String) -> Int {
+        if let marker = text.range(of: "exit") ?? text.range(of: "keluar") {
+            let before = text[..<marker.lowerBound].suffix(12)
+            if let num = before.compactMap({ $0.wholeNumberValue }).last { return num }
+            let after = text[marker.upperBound...].prefix(12)
+            if let num = after.compactMap({ $0.wholeNumberValue }).first { return num }
+        }
+        return 1
+    }
+
+    static func streetName(from instruction: String) -> String? {
+        let separators = [" onto ", " ke ", " menuju ", " toward ", " to ", " on ", " at ", " di "]
+        let trimmed = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        for separator in separators {
+            guard let range = trimmed.range(of: separator, options: .caseInsensitive) else { continue }
+            let suffix = trimmed[range.upperBound...]
+                .trimmingCharacters(in: CharacterSet(charactersIn: " .,"))
+            let lower = suffix.lowercased()
+            if lower.hasPrefix("the right") || lower.hasPrefix("the left") || lower.hasPrefix("kanan") || lower.hasPrefix("kiri") {
+                continue
+            }
+            if !suffix.isEmpty { return suffix }
+        }
+        return nil
+    }
+
     private static func clean(_ text: String) -> String {
         text.replacingOccurrences(of: "  ", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -173,7 +352,7 @@ final class NavigationEngine: NSObject, ObservableObject {
 
     private func format(distance: Double) -> String {
         if distance >= 1000 {
-            return String(format: "%.1f km", distance / 1000)
+            return String(format: "%.1f km", distance / 1000).replacingOccurrences(of: ".", with: ",")
         }
         let rounded = max(10, Int((distance / 10).rounded()) * 10)
         return "\(rounded) m"
@@ -199,16 +378,13 @@ extension NavigationEngine: CLLocationManagerDelegate {
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard isRunning, !arrived, let location = locations.last else { return }
-        guard index < maneuvers.count else { return }
+        guard isRunning, !arrived, let location = locations.last, index < maneuvers.count else { return }
 
         func target(_ i: Int) -> CLLocation {
             let c = maneuvers[i].coordinate
             return CLLocation(latitude: c.latitude, longitude: c.longitude)
         }
 
-        // Self-heal: if the next maneuver is closer than the current one, the user already
-        // passed the current point (GPS jump, tunnel, missed alert). Skip forward.
         var guardCount = 0
         while index + 1 < maneuvers.count, guardCount < maneuvers.count {
             if location.distance(from: target(index + 1)) < location.distance(from: target(index)) {
@@ -220,10 +396,13 @@ extension NavigationEngine: CLLocationManagerDelegate {
         }
 
         let distance = location.distance(from: target(index))
-        nextDistance = format(distance: distance)
-        nextInstruction = maneuvers[index].instruction
-
         let maneuver = maneuvers[index]
+        nextDistance = format(distance: distance)
+        nextInstruction = headline(for: maneuver, distance: distance, includeDistance: false)
+
+        let remaining = max(0, totalDistance - maneuver.distanceFromStart + distance)
+        remainingText = "Sisa \(format(distance: remaining)) lagi sampai tujuan"
+
         let isArrival = maneuver.arriving || index == maneuvers.count - 1
 
         if distance <= (isArrival ? 120 : alertRadius), !alerted.contains(index), Date().timeIntervalSince(lastAlertAt) > 8 {
@@ -231,18 +410,21 @@ extension NavigationEngine: CLLocationManagerDelegate {
             lastAlertAt = Date()
 
             if isArrival {
-                notify(title: "Tujuan tercapai", body: maneuver.instruction)
+                notify(
+                    title: "Tiba di tujuan",
+                    body: maneuver.street ?? "Selamat sampai di lokasi tujuan"
+                )
                 arrived = true
                 status = "Sampai di tujuan"
                 stop()
             } else {
                 notify(
-                    title: maneuver.instruction,
-                    body: "dalam \(format(distance: distance)) • belokan \(index + 1)/\(max(1, maneuvers.count - 1))"
+                    title: headline(for: maneuver, distance: distance),
+                    body: detail(for: maneuver, distance: distance)
                 )
                 index += 1
                 if index < maneuvers.count {
-                    nextInstruction = maneuvers[index].instruction
+                    nextInstruction = headline(for: maneuvers[index], distance: distance, includeDistance: false)
                 }
             }
         }

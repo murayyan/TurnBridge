@@ -93,6 +93,12 @@ struct ContentView: View {
                     }
                 }
 
+                if !engine.remainingText.isEmpty {
+                    Text(engine.remainingText)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(Color(red: 0.65, green: 0.85, blue: 0.7))
+                }
+
                 Button(action: { engine.stop() }) {
                     Text("Hentikan Navigasi")
                         .font(.system(size: 13, weight: .semibold))
