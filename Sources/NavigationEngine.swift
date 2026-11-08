@@ -216,7 +216,7 @@ extension NavigationEngine: CLLocationManagerDelegate {
         }
 
         let distance = location.distance(from: target(index))
-        nextDistance = format(distance)
+        nextDistance = format(distance: distance)
         nextInstruction = maneuvers[index].instruction
 
         let maneuver = maneuvers[index]
@@ -234,7 +234,7 @@ extension NavigationEngine: CLLocationManagerDelegate {
             } else {
                 notify(
                     title: maneuver.instruction,
-                    body: "dalam \(format(distance)) • belokan \(index + 1)/\(max(1, maneuvers.count - 1))"
+                    body: "dalam \(format(distance: distance)) • belokan \(index + 1)/\(max(1, maneuvers.count - 1))"
                 )
                 index += 1
                 if index < maneuvers.count {

@@ -1,12 +1,24 @@
 import SwiftUI
 import MapKit
 
+enum TravelMode: String, CaseIterable, Hashable {
+    case car, walk
+
+    var transport: MKDirectionsTransportType {
+        self == .car ? .automobile : .walking
+    }
+
+    var label: String {
+        self == .car ? "Mobil" : "Jalan"
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject private var engine: NavigationEngine
     @State private var query: String = ""
     @State private var results: [MKMapItem] = []
     @State private var isSearching = false
-    @State private var transport: MKDirectionsTransportType = .automobile
+    @State private var mode: TravelMode = .car
 
     var body: some View {
         NavigationView {
@@ -124,9 +136,10 @@ struct ContentView: View {
             .background(Color(red: 0.14, green: 0.16, blue: 0.20))
             .cornerRadius(10)
 
-            Picker("Mode", selection: $transport) {
-                Text("Mobil").tag(MKDirectionsTransportType.automobile)
-                Text("Jalan").tag(MKDirectionsTransportType.walking)
+            Picker("Mode", selection: $mode) {
+                ForEach(TravelMode.allCases, id: \.self) { item in
+                    Text(item.label).tag(item)
+                }
             }
             .pickerStyle(SegmentedPickerStyle())
         }
@@ -215,6 +228,6 @@ struct ContentView: View {
     private func start(_ item: MKMapItem) {
         results = []
         query = item.name ?? ""
-        engine.start(destination: item, transport: transport)
+        engine.start(destination: item, transport: mode.transport)
     }
 }
