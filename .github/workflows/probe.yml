@@ -1,0 +1,7 @@
+name: Probe
+on: push
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - run: uname -a
