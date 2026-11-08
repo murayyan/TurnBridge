@@ -23,7 +23,7 @@ extension NavigationEngine {
 
         let preview = raw.isEmpty ? (url?.absoluteString ?? "") : raw
         clipboardPreview = String(preview.prefix(80)).replacingOccurrences(of: "\n", with: " ")
-        log("tempel: \(clipboardPreview)")
+        log("tempel: \(String(preview.prefix(280)).replacingOccurrences(of: "\n", with: " | "))")
 
         guard let link = url ?? TargetParser.firstURL(in: raw) else {
             // Plain text: treat it as a place name and let MapKit search it.
@@ -36,8 +36,15 @@ extension NavigationEngine {
             status = "Membuka link pendek…"
             resolve(link) { [weak self] resolved in
                 guard let self else { return }
-                self.log("redirect: \((resolved ?? link).absoluteString.prefix(90))")
-                self.finish(link: resolved ?? link, text: raw)
+                guard let resolved else {
+                    self.log("redirect: gagal")
+                    self.lastError = "Link pendek tidak bisa dibuka — butuh internet"
+                    self.status = "Link pendek gagal dibuka"
+                    self.needsManualInput = true
+                    return
+                }
+                self.log("redirect: \(resolved.absoluteString.prefix(120))")
+                self.finish(link: resolved, text: raw)
             }
             return true
         }
@@ -60,7 +67,14 @@ extension NavigationEngine {
             status = "Membuka link pendek…"
             resolve(link) { [weak self] resolved in
                 guard let self else { return }
-                self.finish(link: resolved ?? link, text: trimmed)
+                guard let resolved else {
+                    self.log("redirect: gagal")
+                    self.lastError = "Link pendek tidak bisa dibuka — butuh internet"
+                    self.status = "Link pendek gagal dibuka"
+                    return
+                }
+                self.log("redirect: \(resolved.absoluteString.prefix(120))")
+                self.finish(link: resolved, text: trimmed)
             }
             return true
         }

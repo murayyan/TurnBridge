@@ -26,6 +26,15 @@ enum TargetParser {
             return ParsedTarget(coordinate: coordinate, name: nil, query: nil)
         }
 
+        // `geo:-6.2,106.8?q=Cafe` / `maps:-6.2,106.8`
+        let lowered = text.lowercased()
+        for prefix in ["geo:", "maps:", "geo:0,0?q="] where lowered.hasPrefix(prefix) {
+            let rest = String(text.dropFirst(prefix.count))
+            if let coordinate = coordinate(from: rest) {
+                return ParsedTarget(coordinate: coordinate, name: nil, query: nil)
+            }
+        }
+
         guard let url = firstURL(in: text) else {
             return ParsedTarget(coordinate: nil, name: text, query: text)
         }
@@ -73,10 +82,13 @@ enum TargetParser {
         return nil
     }
 
-    /// `maps.app.goo.gl/..`, `goo.gl/maps/..`
+    /// Short links that hide the real destination: `maps.apple/p/xxxx` (Apple Maps share
+    /// on iOS 17+), `maps.app.goo.gl/..`, `goo.gl/maps/..`, `g.co/..`.
     static func isShortLink(_ url: URL) -> Bool {
         guard var host = url.host?.lowercased() else { return false }
         if host.hasPrefix("www.") { host.removeFirst(4) }
+        if host == "maps.apple" { return true }
+        if host == "maps.apple.com" && url.path.hasPrefix("/p/") { return true }
         return host == "goo.gl" || host.hasSuffix(".goo.gl") || host == "g.co"
     }
 
@@ -91,10 +103,13 @@ enum TargetParser {
 
     /// "1.23,4.56" / "-6.2, 106.8" / "1.23,4.56,17z"
     static func coordinate(from text: String) -> CLLocationCoordinate2D? {
-        let cleaned = text
+        var cleaned = text
             .replacingOccurrences(of: "loc:", with: "")
             .replacingOccurrences(of: "@", with: "")
             .replacingOccurrences(of: " ", with: "")
+        if let cut = cleaned.firstIndex(where: { $0 == "?" || $0 == ";" }) {
+            cleaned = String(cleaned[..<cut])
+        }
         let parts = cleaned.split(separator: ",").map(String.init)
         guard parts.count >= 2,
               let lat = Double(parts[0]),
