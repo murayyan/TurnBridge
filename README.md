@@ -36,6 +36,17 @@ teks share multi-baris, `maps.apple.com/?q=..&ll=..`, `?daddr=..`, link
 Kalau clipboard tidak terbaca, aplikasi membuka **sheet tempel manual** berisi teks mentah
 clipboard — tempel/rapikan di situ lalu tekan **Mulai Navigasi**.
 
+## Kalau rute tidak muncul
+
+Kartu **DIAGNOSA** di bawah layar mencatat: isi clipboard, link yang dipakai, hasil parsing,
+dan jawaban MapKit. Tekan **Salin log** lalu kirim isinya.
+
+Penyebab yang sudah ditangani otomatis:
+
+- GPS belum dapat titik (baru buka app) → minta satu lokasi lalu hitung ulang.
+- Titik tujuan tidak bisa dirutekan (pin di tengah gedung) → dicari ulang lewat MKLocalSearch.
+- Link `?daddr=Nama`, `?query=..`, `maps.apple.com/directions?destination=..` → dikenali.
+
 ## Build
 
 ### A. GitHub Actions (tanpa Xcode)
